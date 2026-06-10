@@ -1,37 +1,45 @@
-/**
- * SaaS Fraud Engine — Universal Tracker V1.0
- * CDN hosted. Client paste kare:
- *   <script src="https://cdn.jsdelivr.net/gh/naseem61989/SaaS-Fraud-Engine@main/tracker.js?site=CLIENT_NAME&key=CLIENT_TOKEN"></script>
- *
- * SUPABASE_EDGE_URL: apna Supabase Edge Function URL yahan set karo
- */
 (function () {
   "use strict";
 
-  // ============================================================
-  //  CONFIG — script tag ke query params se read hota hai
-  // ============================================================
- var EDGE_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/fraud-ingest";
+  var EDGE_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/fraud-ingest";
 
-  var scriptEl = document.currentScript ||
-    (function () {
+  // ============================================================
+  //  CONFIG — 3 tarike se read karta hai (priority order)
+  //  1. window._ftSite / window._ftKey (inline script se)
+  //  2. script tag query params (?site=&key=)
+  //  3. data-site / data-key attributes
+  // ============================================================
+  var WEBSITE_NAME = "";
+  var CLIENT_TOKEN = "";
+
+  // Method 1: window globals
+  if (window._ftSite && window._ftKey) {
+    WEBSITE_NAME = window._ftSite;
+    CLIENT_TOKEN = window._ftKey;
+  }
+
+  // Method 2: script tag params
+  if (!CLIENT_TOKEN) {
+    var scriptEl = document.currentScript || (function () {
       var tags = document.getElementsByTagName("script");
       return tags[tags.length - 1];
     })();
-
-  var scriptSrc = scriptEl ? scriptEl.src : "";
-  var srcParams = {};
-  try {
-    var qIdx = scriptSrc.indexOf("?");
-    if (qIdx !== -1) {
-      new URLSearchParams(scriptSrc.slice(qIdx + 1)).forEach(function (v, k) {
-        srcParams[k] = v;
-      });
-    }
-  } catch (e) {}
-
-  var WEBSITE_NAME = srcParams["site"] || "Unknown";
-  var CLIENT_TOKEN = srcParams["key"]  || "";
+    var scriptSrc = scriptEl ? scriptEl.src : "";
+    try {
+      var qIdx = scriptSrc.indexOf("?");
+      if (qIdx !== -1) {
+        new URLSearchParams(scriptSrc.slice(qIdx + 1)).forEach(function (v, k) {
+          if (k === "site") WEBSITE_NAME = v;
+          if (k === "key")  CLIENT_TOKEN = v;
+        });
+      }
+      // Method 3: data attributes
+      if (!CLIENT_TOKEN && scriptEl) {
+        WEBSITE_NAME = scriptEl.getAttribute("data-site") || WEBSITE_NAME;
+        CLIENT_TOKEN = scriptEl.getAttribute("data-key")  || CLIENT_TOKEN;
+      }
+    } catch (e) {}
+  }
 
   if (!CLIENT_TOKEN || !WEBSITE_NAME || WEBSITE_NAME === "Unknown") return;
 
