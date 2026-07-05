@@ -44,6 +44,14 @@
   if (!CLIENT_TOKEN || !WEBSITE_NAME || WEBSITE_NAME === "Unknown") return;
 
   // ============================================================
+  //  EDGE-INJECTED IP (Cloudflare middleware se — instant, reliable)
+  //  Cloudflare sites pe ye set hoti hai. WordPress/Shopify pe null
+  //  rahegi aur neeche wala cdn-cgi/trace fallback chalega.
+  // ============================================================
+  var EDGE_IP      = (window._ftIP && window._ftIP !== "Unknown") ? window._ftIP : null;
+  var EDGE_COUNTRY = window._ftCountry || "";
+
+  // ============================================================
   //  GCLID VALIDATION
   // ============================================================
   var urlParams = new URLSearchParams(window.location.search);
@@ -67,13 +75,22 @@
                     "google-inspectiontool","bingbot","yandexbot"];
   if (LEGIT_BOTS.some(function (b) { return UA_LOWER.indexOf(b) !== -1; })) return;
 
-  if (/\(linux; android \d+; [a-z]\)/i.test(UA) ||
-      !navigator.languages || navigator.languages.length === 0) {
+  // ── GHOST BOT DETECTION ──
+  // NOTE: Purana "Android 10; K" (linux; android N; X) UA check HATA diya gaya hai.
+  // Wajah: Chrome ki User-Agent Reduction ki wajah se ASLI Android Chrome users bhi
+  // exactly "Android 10; K" bhejte hain — us UA pe ghost banana = REAL customers
+  // ko block karna. Ab sirf RELIABLE automation signals pe ghost maante hain:
+  //   - navigator.webdriver / headless / phantom  (isHardwareBot)
+  //   - navigator.languages khaali  (strong headless signal)
+  // Baaki suspicious behaviour (0 interaction, datacenter IP, fast bounce) neeche
+  // scoring rules se pakda jaata hai — jise agent ke rules aage handle karte hain.
+  var noLangs = !navigator.languages || navigator.languages.length === 0;
+  if (isHardwareBot() || noLangs) {
     var ghostPayload = {
       key: CLIENT_TOKEN, website: WEBSITE_NAME, gclid: gclid,
-      ip: "Unknown", device_id: "ghost-ua-detected", is_bot: "True",
+      ip: EDGE_IP || "Unknown", device_id: "ghost-ua-detected", is_bot: "True",
       time_on_page: "0", score: "100", interactions: "0",
-      scroll_depth: "0", is_vpn: "0", country: "Bot",
+      scroll_depth: "0", is_vpn: "0", country: EDGE_COUNTRY || "Bot",
       ua: UA.substring(0, 200)
     };
     var ghostUrl = EDGE_URL + "?" + new URLSearchParams(ghostPayload).toString();
@@ -174,11 +191,22 @@
 
   // ============================================================
   //  CLOUDFLARE IP TRACE
+  //  Priority: (1) middleware se aayi EDGE_IP  (2) cdn-cgi/trace fallback
   // ============================================================
   var ipData  = { ip: "Unknown", vpn: "0", country: "" };
   var ipReady = false;
 
   function fetchIP() {
+    // Cloudflare middleware ne IP inject kar di? To network call ki zaroorat hi nahi.
+    // Fast bounce pe bhi IP guaranteed — Unknown khatam.
+    if (EDGE_IP) {
+      ipData.ip = EDGE_IP;
+      ipData.country = EDGE_COUNTRY || ipData.country;
+      ipReady = true;
+      if (isDataCenterIP(ipData.ip)) sendData();
+      return;
+    }
+    // Fallback (WordPress/Shopify/non-CF sites): purana behaviour, jaisa tha waisa.
     fetch("https://cloudflare.com/cdn-cgi/trace", { signal: AbortSignal.timeout(3000) })
       .then(function (r) { return r.text(); })
       .then(function (txt) {
