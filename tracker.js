@@ -44,7 +44,10 @@
   var gclid     = rawGclid || rawWbraid;
 
   if (!gclid) return;
-  if (rawGclid && (rawGclid.length < 20 || rawGclid.toLowerCase().startsWith("gtm_"))) return;
+  if (rawGclid) {
+    if (rawGclid.length < 20 || rawGclid.toLowerCase().startsWith("gtm_")) return;
+  }
+  if (!rawGclid && rawWbraid && rawWbraid.length < 10) return;
   if (/test|fake|demo/i.test(gclid) || document.cookie.indexOf("__TAG_ASSISTANT") !== -1) return;
 
   var SESSION_KEY = "ftv10_" + gclid;
@@ -52,25 +55,12 @@
 
   var UA       = navigator.userAgent;
   var UA_LOWER = UA.toLowerCase();
-  var LEGIT_BOTS = ["googlebot","adsbot-google","mediapartners-google",
-                    "google-inspectiontool","bingbot","yandexbot"];
-  if (LEGIT_BOTS.some(function (b) { return UA_LOWER.indexOf(b) !== -1; })) return;
 
-  var noLangs = !navigator.languages || navigator.languages.length === 0;
-  if (isHardwareBot() || noLangs) {
-    var ghostPayload = {
-      key: CLIENT_TOKEN, website: WEBSITE_NAME, gclid: gclid,
-      ip: EDGE_IP || "Unknown", device_id: "ghost-ua-detected", is_bot: "True",
-      time_on_page: "0", score: "100", interactions: "0",
-      scroll_depth: "0", is_vpn: "0", country: EDGE_COUNTRY || "Bot",
-      ua: UA.substring(0, 200)
-    };
-    var ghostUrl = EDGE_URL + "?" + new URLSearchParams(ghostPayload).toString();
-    if (navigator.sendBeacon) navigator.sendBeacon(ghostUrl);
-    else new Image().src = ghostUrl;
-    sessionStorage.setItem(SESSION_KEY, "1");
-    return;
-  }
+  var LEGIT_BOTS = [
+    "googlebot", "adsbot-google", "mediapartners-google",
+    "google-inspectiontool", "bingbot", "yandexbot"
+  ];
+  if (LEGIT_BOTS.some(function (b) { return UA_LOWER.indexOf(b) !== -1; })) return;
 
   var DATACENTER_PREFIXES = [
     "3.","13.","15.","18.","34.","35.","44.","52.","54.","99.",
@@ -101,6 +91,39 @@
     return DATACENTER_PREFIXES.some(function (p) { return ip.indexOf(p) === 0; });
   }
 
+  function isHardwareBot() {
+    return (
+      navigator.webdriver === true ||
+      !!window._phantom ||
+      UA_LOWER.indexOf("headlesschrome") !== -1
+    );
+  }
+
+  var noLangs = !navigator.languages || navigator.languages.length === 0;
+
+  if (isHardwareBot()) {
+    var ghostPayload = {
+      key:          CLIENT_TOKEN,
+      website:      WEBSITE_NAME,
+      gclid:        gclid,
+      ip:           EDGE_IP || "Unknown",
+      device_id:    "ghost-ua-detected",
+      is_bot:       "True",
+      time_on_page: "0",
+      score:        "100",
+      interactions: "0",
+      scroll_depth: "0",
+      is_vpn:       "0",
+      country:      EDGE_COUNTRY || "Bot",
+      ua:           UA.substring(0, 200)
+    };
+    var ghostUrl = EDGE_URL + "?" + new URLSearchParams(ghostPayload).toString();
+    if (navigator.sendBeacon) navigator.sendBeacon(ghostUrl);
+    else new Image().src = ghostUrl;
+    sessionStorage.setItem(SESSION_KEY, "1");
+    return;
+  }
+
   var interactionCount = 0, scrollDepth = 0, touchMoveCount = 0;
   var firstInteractMs  = null, mousePoints = 0;
   var lastMouseX = -1, lastMouseY = -1;
@@ -117,29 +140,45 @@
   window.addEventListener("mousemove", function (e) {
     var dx = Math.abs(e.clientX - lastMouseX), dy = Math.abs(e.clientY - lastMouseY);
     if (dx + dy > 50) {
-      mousePoints++; lastMouseX = e.clientX; lastMouseY = e.clientY;
+      mousePoints++;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
       recordInteraction("mouse");
     }
   });
+
   window.addEventListener("scroll", function () {
-    var d = Math.round(
-      (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100
-    );
-    if (d > scrollDepth && d <= 100) scrollDepth = d;
+    var scrollable = document.body.scrollHeight - window.innerHeight;
+    var d;
+    if (scrollable <= 0) {
+      d = 100;
+    } else {
+      d = Math.round((window.scrollY / scrollable) * 100);
+      if (d > 100) d = 100;
+      if (d < 0)   d = 0;
+    }
+    if (d > scrollDepth) scrollDepth = d;
     recordInteraction("scroll");
   }, { passive: true });
-  window.addEventListener("click",     function () { recordInteraction("click"); });
-  window.addEventListener("keydown",   function () { recordInteraction("key"); });
-  window.addEventListener("touchstart",function () { recordInteraction("touch"); }, { passive: true });
-  window.addEventListener("touchmove", function () { touchMoveCount++; recordInteraction("touchmove"); }, { passive: true });
+
+  window.addEventListener("click",      function () { recordInteraction("click"); });
+  window.addEventListener("keydown",    function () { recordInteraction("key"); });
+  window.addEventListener("touchstart", function () { recordInteraction("touch"); }, { passive: true });
+  window.addEventListener("touchmove",  function () {
+    touchMoveCount++;
+    recordInteraction("touchmove");
+  }, { passive: true });
 
   function buildFingerprint() {
-    var cv = document.createElement("canvas"), ctx = cv.getContext("2d");
-    ctx.textBaseline = "top"; ctx.font = "14px Arial";
-    ctx.fillStyle = "#f60"; ctx.fillRect(125, 1, 62, 20);
-    ctx.fillStyle = "#069"; ctx.fillText("TrackerV10", 2, 15);
-    var raw = cv.toDataURL() + UA + screen.width + "x" + screen.height +
-              new Date().getTimezoneOffset();
+    var cv  = document.createElement("canvas");
+    var ctx = cv.getContext("2d");
+    ctx.textBaseline = "top";
+    ctx.font         = "14px Arial";
+    ctx.fillStyle    = "#f60";
+    ctx.fillRect(125, 1, 62, 20);
+    ctx.fillStyle = "#069";
+    ctx.fillText("TrackerV10", 2, 15);
+    var raw  = cv.toDataURL() + UA + screen.width + "x" + screen.height + new Date().getTimezoneOffset();
     var hash = 0;
     for (var i = 0; i < raw.length; i++) hash = ((hash << 5) - hash) + raw.charCodeAt(i);
     return "DEV-" + Math.abs(hash).toString(16);
@@ -152,11 +191,21 @@
     try { localStorage.setItem("ftv10_device", deviceId); } catch (e) {}
   }
 
-  var convSent = {};   // ek type ek hi baar (phone/whatsapp/form)
+  var ipData  = { ip: "Unknown", vpn: "0", country: "" };
+  var ipReady = false;
+  var convSent    = {};
+  var convPending = [];
 
-  function sendConversion(type) {
-    if (interactionCount < 1 && scrollDepth === 0 && !touchDetected) return;
+  function flushPendingConversions() {
+    while (convPending.length > 0) {
+      var type = convPending.shift();
+      _doSendConversion(type);
+    }
+  }
+
+  function _doSendConversion(type) {
     if (convSent[type]) return;
+    if (interactionCount < 1 && scrollDepth === 0 && !touchDetected) return;
     convSent[type] = true;
 
     var convPayload = new URLSearchParams({
@@ -164,13 +213,22 @@
       gclid:     gclid,
       website:   WEBSITE_NAME,
       type:      type,
-      ip:        (EDGE_IP || ipData.ip || "Unknown"),
+      ip:        ipData.ip,
       device_id: deviceId
     }).toString();
 
     var url = CONV_URL + "?" + convPayload;
     if (navigator.sendBeacon) navigator.sendBeacon(url);
     else new Image().src = url;
+  }
+
+  function sendConversion(type) {
+    if (convSent[type]) return;
+    if (ipReady) {
+      _doSendConversion(type);
+    } else {
+      if (convPending.indexOf(type) === -1) convPending.push(type);
+    }
   }
 
   function bindConversions() {
@@ -180,7 +238,7 @@
     document.querySelectorAll('a[href*="wa.me"], a[href*="whatsapp"]').forEach(function (el) {
       el.addEventListener("click", function () { sendConversion("whatsapp"); });
     });
-    document.querySelectorAll('form').forEach(function (form) {
+    document.querySelectorAll("form").forEach(function (form) {
       form.addEventListener("submit", function () { sendConversion("form"); });
     });
   }
@@ -191,14 +249,12 @@
     bindConversions();
   }
 
-  var ipData  = { ip: "Unknown", vpn: "0", country: "" };
-  var ipReady = false;
-
   function fetchIP() {
     if (EDGE_IP) {
-      ipData.ip = EDGE_IP;
+      ipData.ip      = EDGE_IP;
       ipData.country = EDGE_COUNTRY || ipData.country;
-      ipReady = true;
+      ipReady        = true;
+      flushPendingConversions();
       if (isDataCenterIP(ipData.ip)) sendData();
       return;
     }
@@ -210,30 +266,30 @@
           var p = l.split("=");
           if (p.length === 2) obj[p[0].trim()] = p[1].trim();
         });
-        if (obj.ip) { ipData.ip = obj.ip; ipData.country = obj.loc || ""; }
+        if (obj.ip) {
+          ipData.ip      = obj.ip;
+          ipData.country = obj.loc || "";
+        }
       })
       .catch(function () {})
       .finally(function () {
         ipReady = true;
+        flushPendingConversions();
         if (isDataCenterIP(ipData.ip)) sendData();
       });
   }
   fetchIP();
 
-  function isHardwareBot() {
-    return (navigator.webdriver === true || window._phantom ||
-            UA_LOWER.indexOf("headlesschrome") !== -1);
-  }
-
   function calculateScore(timeOnPage) {
     var s = 0;
-    if (isHardwareBot())                                              s += 100;
-    if (isDataCenterIP(ipData.ip))                                   s += 80;
-    if (interactionCount === 0 && touchMoveCount === 0 && timeOnPage > 4) s += 30;
-    if (firstInteractMs !== null && firstInteractMs < 250)           s += 30;
-    if (scrollDepth === 0 && timeOnPage > 8)                         s += 20;
+    if (isHardwareBot())                                                      s += 100;
+    if (isDataCenterIP(ipData.ip))                                            s += 80;
+    if (noLangs)                                                              s += 20;
+    if (interactionCount === 0 && touchMoveCount === 0 && timeOnPage > 4)    s += 30;
+    if (firstInteractMs !== null && firstInteractMs < 250)                   s += 30;
+    if (scrollDepth === 0 && timeOnPage > 8)                                 s += 20;
     if (!touchDetected && !keyDetected && interactionCount < 2 && timeOnPage > 6) s += 15;
-    return s;
+    return Math.min(s, 100);
   }
 
   var dataSent = false;
@@ -245,9 +301,9 @@
     dataSent = true;
     sessionStorage.setItem(SESSION_KEY, "1");
 
-    var timeOnPage  = Math.round((performance.now() - initTime) / 1000);
-    var finalScore  = calculateScore(timeOnPage);
-    var finalIsBot  = finalScore >= 50 ? "True" : "False";
+    var timeOnPage = Math.round((performance.now() - initTime) / 1000);
+    var finalScore = calculateScore(timeOnPage);
+    var finalIsBot = finalScore >= 50 ? "True" : "False";
 
     var payload = new URLSearchParams({
       key:          CLIENT_TOKEN,
@@ -266,12 +322,11 @@
     }).toString();
 
     var finalUrl = EDGE_URL + "?" + payload;
-
     if (navigator.sendBeacon) navigator.sendBeacon(finalUrl);
     else new Image().src = finalUrl;
   }
 
-  window.addEventListener("pagehide",        sendData, { once: true });
+  window.addEventListener("pagehide",         sendData, { once: true });
   window.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") sendData();
   });
