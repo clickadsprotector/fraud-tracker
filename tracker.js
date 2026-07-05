@@ -2,23 +2,16 @@
   "use strict";
 
   var EDGE_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/fraud-ingest";
+  var CONV_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/conversion-ingest";
 
-  // ============================================================
-  //  CONFIG — 3 tarike se read karta hai (priority order)
-  //  1. window._ftSite / window._ftKey (inline script se)
-  //  2. script tag query params (?site=&key=)
-  //  3. data-site / data-key attributes
-  // ============================================================
   var WEBSITE_NAME = "";
   var CLIENT_TOKEN = "";
 
-  // Method 1: window globals
   if (window._ftSite && window._ftKey) {
     WEBSITE_NAME = window._ftSite;
     CLIENT_TOKEN = window._ftKey;
   }
 
-  // Method 2: script tag params
   if (!CLIENT_TOKEN) {
     var scriptEl = document.currentScript || (function () {
       var tags = document.getElementsByTagName("script");
@@ -33,7 +26,6 @@
           if (k === "key")  CLIENT_TOKEN = v;
         });
       }
-      // Method 3: data attributes
       if (!CLIENT_TOKEN && scriptEl) {
         WEBSITE_NAME = scriptEl.getAttribute("data-site") || WEBSITE_NAME;
         CLIENT_TOKEN = scriptEl.getAttribute("data-key")  || CLIENT_TOKEN;
@@ -43,17 +35,9 @@
 
   if (!CLIENT_TOKEN || !WEBSITE_NAME || WEBSITE_NAME === "Unknown") return;
 
-  // ============================================================
-  //  EDGE-INJECTED IP (Cloudflare middleware se — instant, reliable)
-  //  Cloudflare sites pe ye set hoti hai. WordPress/Shopify pe null
-  //  rahegi aur neeche wala cdn-cgi/trace fallback chalega.
-  // ============================================================
   var EDGE_IP      = (window._ftIP && window._ftIP !== "Unknown") ? window._ftIP : null;
   var EDGE_COUNTRY = window._ftCountry || "";
 
-  // ============================================================
-  //  GCLID VALIDATION
-  // ============================================================
   var urlParams = new URLSearchParams(window.location.search);
   var rawGclid  = urlParams.get("gclid");
   var rawWbraid = urlParams.get("wbraid") || urlParams.get("gbraid");
@@ -66,24 +50,12 @@
   var SESSION_KEY = "ftv10_" + gclid;
   if (sessionStorage.getItem(SESSION_KEY)) return;
 
-  // ============================================================
-  //  LEGIT BOT & GHOST BOT KILLER
-  // ============================================================
   var UA       = navigator.userAgent;
   var UA_LOWER = UA.toLowerCase();
   var LEGIT_BOTS = ["googlebot","adsbot-google","mediapartners-google",
                     "google-inspectiontool","bingbot","yandexbot"];
   if (LEGIT_BOTS.some(function (b) { return UA_LOWER.indexOf(b) !== -1; })) return;
 
-  // ── GHOST BOT DETECTION ──
-  // NOTE: Purana "Android 10; K" (linux; android N; X) UA check HATA diya gaya hai.
-  // Wajah: Chrome ki User-Agent Reduction ki wajah se ASLI Android Chrome users bhi
-  // exactly "Android 10; K" bhejte hain — us UA pe ghost banana = REAL customers
-  // ko block karna. Ab sirf RELIABLE automation signals pe ghost maante hain:
-  //   - navigator.webdriver / headless / phantom  (isHardwareBot)
-  //   - navigator.languages khaali  (strong headless signal)
-  // Baaki suspicious behaviour (0 interaction, datacenter IP, fast bounce) neeche
-  // scoring rules se pakda jaata hai — jise agent ke rules aage handle karte hain.
   var noLangs = !navigator.languages || navigator.languages.length === 0;
   if (isHardwareBot() || noLangs) {
     var ghostPayload = {
@@ -100,9 +72,6 @@
     return;
   }
 
-  // ============================================================
-  //  DATACENTER PREFIX LIST
-  // ============================================================
   var DATACENTER_PREFIXES = [
     "3.","13.","15.","18.","34.","35.","44.","52.","54.","99.",
     "20.","40.","51.","104.","168.",
@@ -132,9 +101,6 @@
     return DATACENTER_PREFIXES.some(function (p) { return ip.indexOf(p) === 0; });
   }
 
-  // ============================================================
-  //  INTERACTION & SCROLL TRACKING
-  // ============================================================
   var interactionCount = 0, scrollDepth = 0, touchMoveCount = 0;
   var firstInteractMs  = null, mousePoints = 0;
   var lastMouseX = -1, lastMouseY = -1;
@@ -167,9 +133,6 @@
   window.addEventListener("touchstart",function () { recordInteraction("touch"); }, { passive: true });
   window.addEventListener("touchmove", function () { touchMoveCount++; recordInteraction("touchmove"); }, { passive: true });
 
-  // ============================================================
-  //  FINGERPRINT
-  // ============================================================
   function buildFingerprint() {
     var cv = document.createElement("canvas"), ctx = cv.getContext("2d");
     ctx.textBaseline = "top"; ctx.font = "14px Arial";
@@ -189,16 +152,49 @@
     try { localStorage.setItem("ftv10_device", deviceId); } catch (e) {}
   }
 
-  // ============================================================
-  //  CLOUDFLARE IP TRACE
-  //  Priority: (1) middleware se aayi EDGE_IP  (2) cdn-cgi/trace fallback
-  // ============================================================
+  var convSent = {};   // ek type ek hi baar (phone/whatsapp/form)
+
+  function sendConversion(type) {
+    if (interactionCount < 1 && scrollDepth === 0 && !touchDetected) return;
+    if (convSent[type]) return;
+    convSent[type] = true;
+
+    var convPayload = new URLSearchParams({
+      key:       CLIENT_TOKEN,
+      gclid:     gclid,
+      website:   WEBSITE_NAME,
+      type:      type,
+      ip:        (EDGE_IP || ipData.ip || "Unknown"),
+      device_id: deviceId
+    }).toString();
+
+    var url = CONV_URL + "?" + convPayload;
+    if (navigator.sendBeacon) navigator.sendBeacon(url);
+    else new Image().src = url;
+  }
+
+  function bindConversions() {
+    document.querySelectorAll('a[href^="tel:"]').forEach(function (el) {
+      el.addEventListener("click", function () { sendConversion("phone"); });
+    });
+    document.querySelectorAll('a[href*="wa.me"], a[href*="whatsapp"]').forEach(function (el) {
+      el.addEventListener("click", function () { sendConversion("whatsapp"); });
+    });
+    document.querySelectorAll('form').forEach(function (form) {
+      form.addEventListener("submit", function () { sendConversion("form"); });
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindConversions);
+  } else {
+    bindConversions();
+  }
+
   var ipData  = { ip: "Unknown", vpn: "0", country: "" };
   var ipReady = false;
 
   function fetchIP() {
-    // Cloudflare middleware ne IP inject kar di? To network call ki zaroorat hi nahi.
-    // Fast bounce pe bhi IP guaranteed — Unknown khatam.
     if (EDGE_IP) {
       ipData.ip = EDGE_IP;
       ipData.country = EDGE_COUNTRY || ipData.country;
@@ -206,7 +202,6 @@
       if (isDataCenterIP(ipData.ip)) sendData();
       return;
     }
-    // Fallback (WordPress/Shopify/non-CF sites): purana behaviour, jaisa tha waisa.
     fetch("https://cloudflare.com/cdn-cgi/trace", { signal: AbortSignal.timeout(3000) })
       .then(function (r) { return r.text(); })
       .then(function (txt) {
@@ -225,9 +220,6 @@
   }
   fetchIP();
 
-  // ============================================================
-  //  SCORING
-  // ============================================================
   function isHardwareBot() {
     return (navigator.webdriver === true || window._phantom ||
             UA_LOWER.indexOf("headlesschrome") !== -1);
@@ -244,9 +236,6 @@
     return s;
   }
 
-  // ============================================================
-  //  SEND TO SUPABASE EDGE FUNCTION
-  // ============================================================
   var dataSent = false;
 
   function sendData() {
