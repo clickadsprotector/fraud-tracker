@@ -1,6 +1,17 @@
 (function () {
   "use strict";
 
+  // ============================================================
+  //  TRACKER v12 — 2026-07-09
+  //  v12 CHANGE: trimmed DATACENTER_PREFIXES (see block below) —
+  //  root-caused as part of the Jul 5-6 real-customer blocking
+  //  incident. Full writeup: clickadsprotector/Fraud-Detection-Engine
+  //  fraud_agent.py header comment (V20.4).
+  //  v11 (Jul 5-6): added EDGE_IP (_ftIP/_ftCountry from Cloudflare
+  //  middleware CF-Connecting-IP), conversion tracking (phone/
+  //  whatsapp/form), active-time + entropy scoring.
+  // ============================================================
+
   var EDGE_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/fraud-ingest";
   var CONV_URL = "https://dcqppxhrahpwqtobgsfo.supabase.co/functions/v1/conversion-ingest";
 
@@ -58,9 +69,13 @@
                     "google-inspectiontool","bingbot","yandexbot"];
   if (LEGIT_BOTS.some(function (b) { return UA_LOWER.indexOf(b) !== -1; })) return;
 
+  // Broad single/double-octet catch-alls removed (v12, 2026-07-09):
+  // "3.","13.","15.","18.","34.","35.","44.","52.","54.","99.",
+  // "20.","40.","51.","104.","168." — these overlap huge legitimate
+  // ISP/mobile-carrier ranges (99.0.0.0/8 is mostly US residential
+  // cable, 104.0.0.0/8 has large AT&T mobile blocks, 20./40. aren't
+  // exclusively Azure). Only precise provider-specific ranges remain.
   var DATACENTER_PREFIXES = [
-    "3.","13.","15.","18.","34.","35.","44.","52.","54.","99.",
-    "20.","40.","51.","104.","168.",
     "51.68.","51.75.","51.77.","51.89.","54.36.","54.38.",
     "91.121.","94.23.","95.211.","176.31.",
     "104.131.","104.236.","107.170.","128.199.","134.209.","138.197.",
