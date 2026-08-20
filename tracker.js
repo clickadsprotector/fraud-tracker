@@ -359,7 +359,17 @@
       el.addEventListener("click", function () { sendConversion("whatsapp"); });
     });
     document.querySelectorAll("form").forEach(function (form) {
-      form.addEventListener("submit", function () { sendConversion("form"); });
+      form.addEventListener("submit", function () {
+        // Jis form ka chhupa honeypot bhara hua hai wo lead nahi, bot hai.
+        // Usay conversions me likhne ka matlab: uska IP/device/gclid 15 din
+        // ke liye trusted, aur fraud_agent.py phir usay block hi nahi karega
+        // — yani bot khud ko block-proof bana leta. injectHoneypot() ki
+        // submit listener isse PEHLE register hoti hai (readyState ke dono
+        // raaston mein), is liye yahan value pehle se set ho chuki hoti hai.
+        var hp = form.querySelector(".ftv11-hp");
+        if (hp && hp.value !== "") return;
+        sendConversion("form");
+      });
     });
   }
 
