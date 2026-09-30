@@ -60,6 +60,25 @@
   if (/test|fake|demo/i.test(gclid) || document.cookie.indexOf("__TAG_ASSISTANT") !== -1) return;
 
   var SESSION_KEY = "ftv11_" + gclid;
+
+  // Ad context from the keyword tool's final URL suffix. `loc` is Google's
+  // PHYSICAL location of the clicker (criterion id), set by Google, not by the
+  // browser - so comparing it with the IP country is one of the cleanest fraud
+  // signals there is: a click Google places in Dubai whose IP sits in another
+  // country is a VPN, a proxy or a click farm.
+  var AD_CTX = {
+    cid:  (urlParams.get("cid")  || "").slice(0, 32),
+    agid: (urlParams.get("agid") || "").slice(0, 32),
+    kw:   (urlParams.get("kw")   || "").slice(0, 160),
+    mt:   (urlParams.get("mt")   || "").slice(0, 8),
+    dev:  (urlParams.get("dev")  || "").slice(0, 8),
+    loc:  (urlParams.get("loc")  || "").slice(0, 32),
+    net:  (urlParams.get("net")  || "").slice(0, 8)
+  };
+  function withAd(o) {
+    for (var k in AD_CTX) { if (AD_CTX[k]) o[k] = AD_CTX[k]; }
+    return o;
+  }
   if (sessionStorage.getItem(SESSION_KEY)) return;
 
   var UA       = navigator.userAgent;
@@ -128,7 +147,7 @@
       country:      EDGE_COUNTRY || "Bot",
       ua:           UA.substring(0, 200)
     };
-    var ghostUrl = EDGE_URL + "?" + new URLSearchParams(ghostPayload).toString();
+    var ghostUrl = EDGE_URL + "?" + new URLSearchParams(withAd(ghostPayload)).toString();
     if (navigator.sendBeacon) navigator.sendBeacon(ghostUrl);
     else new Image().src = ghostUrl;
     sessionStorage.setItem(SESSION_KEY, "1");
@@ -442,7 +461,7 @@
     var finalScore = calculateScore(timeOnPage);
     var finalIsBot = finalScore >= 50 ? "True" : "False";
 
-    finalUrl = EDGE_URL + "?" + new URLSearchParams({
+    finalUrl = EDGE_URL + "?" + new URLSearchParams(withAd({
       key:          CLIENT_TOKEN,
       ip:           ipData.ip,
       gclid:        gclid,
@@ -456,7 +475,7 @@
       is_vpn:       ipData.vpn,
       country:      ipData.country,
       ua:           UA.substring(0, 200)
-    }).toString();
+    })).toString();
 
     if (navigator.sendBeacon) navigator.sendBeacon(finalUrl);
     else new Image().src = finalUrl;
@@ -468,7 +487,7 @@
       var timeOnPage = getActiveTime();
       var finalScore = calculateScore(timeOnPage);
       var finalIsBot = finalScore >= 50 ? "True" : "False";
-      finalUrl = EDGE_URL + "?" + new URLSearchParams({
+      finalUrl = EDGE_URL + "?" + new URLSearchParams(withAd({
         key:          CLIENT_TOKEN,
         ip:           ipData.ip,
         gclid:        gclid,
@@ -482,7 +501,7 @@
         is_vpn:       ipData.vpn,
         country:      ipData.country,
         ua:           UA.substring(0, 200)
-      }).toString();
+      })).toString();
     }
     if (e.persisted) {
       try {
